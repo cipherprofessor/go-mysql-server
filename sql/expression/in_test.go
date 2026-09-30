@@ -166,6 +166,15 @@ func TestInTuple(t *testing.T) {
 			err:    nil,
 			row:    nil,
 			result: false,
+		},
+		{
+			name: "numeric zero on left side; string non-numeric on non-static right",
+			left: expression.NewLiteral(int64(0), types.Int64),
+			right: expression.NewTuple(
+				expression.NewGetField(0, types.LongText, "val", false),
+			),
+			row:    sql.NewRow("abc"),
+			result: true,
 		}}
 
 	for _, tt := range testCases {
@@ -271,8 +280,7 @@ func TestNotInTuple(t *testing.T) {
 func TestHashInTuple(t *testing.T) {
 	t.Run("tuple null makes expression nullable", func(t *testing.T) {
 		ctx := sql.NewEmptyContext()
-		expr, err := expression.NewHashInTuple(
-			ctx,
+		in := expression.NewInTuple(
 			expression.NewTuple(
 				expression.NewLiteral(int64(20), types.Int64),
 				expression.NewLiteral(int64(1), types.Int64),
@@ -284,13 +292,14 @@ func TestHashInTuple(t *testing.T) {
 				),
 			),
 		)
+		require.NoError(t, in.ResolveComparisonCoercibility(ctx))
+		expr, err := expression.NewHashInTuple(ctx, in)
 		require.NoError(t, err)
 		require.True(t, expr.IsNullable(ctx))
 	})
 	t.Run("nullable tuple component makes expression nullable", func(t *testing.T) {
 		ctx := sql.NewEmptyContext()
-		expr, err := expression.NewHashInTuple(
-			ctx,
+		in := expression.NewInTuple(
 			expression.NewTuple(
 				expression.NewLiteral(int64(20), types.Int64),
 				expression.NewGetField(0, types.Int64, "nullable", true),
@@ -302,6 +311,8 @@ func TestHashInTuple(t *testing.T) {
 				),
 			),
 		)
+		require.NoError(t, in.ResolveComparisonCoercibility(ctx))
+		expr, err := expression.NewHashInTuple(ctx, in)
 		require.NoError(t, err)
 		require.True(t, expr.IsNullable(ctx))
 	})
@@ -714,26 +725,68 @@ func TestHashInTuple(t *testing.T) {
 			row:    sql.NewRow(int64(2), int64(0)),
 			result: true,
 		},
+		{
+			name: "illegal mix of collations in right tuple",
+			left: expression.NewLiteral("a", types.MustCreateString(sqltypes.VarChar, 10, sql.Collation_latin1_swedish_ci)),
+			right: expression.NewTuple(
+				expression.NewCollatedExpression(expression.NewLiteral("b", types.MustCreateString(sqltypes.VarChar, 10, sql.Collation_latin1_bin)), sql.Collation_latin1_bin),
+				expression.NewCollatedExpression(expression.NewLiteral("c", types.MustCreateString(sqltypes.VarChar, 10, sql.Collation_latin1_general_ci)), sql.Collation_latin1_general_ci),
+			),
+			staticErr: sql.ErrCollationIllegalMix,
+		},
+		{
+			name: "row tuple comparison skips scalar collation aggregation",
+			left: expression.NewTuple(
+				expression.NewLiteral(int64(1), types.Int64),
+				expression.NewCollatedExpression(
+					expression.NewLiteral("cafe", types.MustCreateString(sqltypes.VarChar, 10, sql.Collation_utf8mb4_unicode_ci)),
+					sql.Collation_utf8mb4_unicode_ci,
+				),
+			),
+			right: expression.NewTuple(
+				expression.NewTuple(
+					expression.NewLiteral(int64(1), types.Int64),
+					expression.NewLiteral("café", types.MustCreateString(sqltypes.VarChar, 10, sql.Collation_utf8mb4_unicode_ci)),
+				),
+			),
+			result: true,
+		},
+		{
+			name: "numeric zero on left side; string non-numeric on right",
+			left: expression.NewLiteral(int64(0), types.Int64),
+			right: expression.NewTuple(
+				expression.NewLiteral("abc", types.LongText),
+			),
+			result: true,
+		},
 	}
 
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := sql.NewEmptyContext()
 			require := require.New(t)
-			expr, err := expression.NewHashInTuple(ctx, tt.left, tt.right)
+			in := expression.NewInTuple(tt.left, tt.right)
+			rErr := in.ResolveComparisonCoercibility(ctx)
 			if tt.staticErr != nil {
+				if rErr != nil {
+					require.True(tt.staticErr.Is(rErr))
+					return
+				}
+				_, err := expression.NewHashInTuple(ctx, in)
 				require.Error(err)
 				require.True(tt.staticErr.Is(err))
+				return
+			}
+			require.NoError(rErr)
+			expr, err := expression.NewHashInTuple(ctx, in)
+			require.NoError(err)
+			result, err := expr.Eval(ctx, tt.row)
+			if tt.evalErr != nil {
+				require.Error(err)
+				require.True(tt.evalErr.Is(err))
 			} else {
 				require.NoError(err)
-				result, err := expr.Eval(ctx, tt.row)
-				if tt.evalErr != nil {
-					require.Error(err)
-					require.True(tt.evalErr.Is(err))
-				} else {
-					require.NoError(err)
-					require.Equal(tt.result, result)
-				}
+				require.Equal(tt.result, result)
 			}
 		})
 	}

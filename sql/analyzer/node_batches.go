@@ -91,6 +91,10 @@ func getBatchesForNode(scope *plan.Scope, node sql.Node, qFlags *sql.QueryFlags)
 							Apply: optimizeJoins,
 						},
 						{
+							Id:    resolveCollationCoercibilityId,
+							Apply: resolveCollationCoercibility,
+						},
+						{
 							Id:    applyHashInId,
 							Apply: applyHashIn,
 						},
@@ -136,6 +140,10 @@ func getBatchesForNode(scope *plan.Scope, node sql.Node, qFlags *sql.QueryFlags)
 							Apply: optimizeJoins,
 						},
 						{
+							Id:    resolveCollationCoercibilityId,
+							Apply: resolveCollationCoercibility,
+						},
+						{
 							Id:    applyHashInId,
 							Apply: applyHashIn,
 						},
@@ -160,6 +168,10 @@ func getBatchesForNode(scope *plan.Scope, node sql.Node, qFlags *sql.QueryFlags)
 					Desc:       "onceBeforeDefault",
 					Iterations: 1,
 					Rules: []Rule{
+						{
+							Id:    resolveCollationCoercibilityId,
+							Apply: resolveCollationCoercibility,
+						},
 						{
 							Id:    simplifyFiltersId,
 							Apply: simplifyFilters,
@@ -212,6 +224,10 @@ func getBatchesForNode(scope *plan.Scope, node sql.Node, qFlags *sql.QueryFlags)
 						{
 							Id:    eraseProjectionId,
 							Apply: eraseProjection,
+						},
+						{
+							Id:    resolveCollationCoercibilityId,
+							Apply: resolveCollationCoercibility,
 						},
 						{
 							Id:    applyHashInId,

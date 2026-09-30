@@ -24,11 +24,14 @@ import (
 
 // Field joins several strings together.
 type Field struct {
-	args []sql.Expression
+	args         []sql.Expression
+	collation    sql.CollationID
+	coercibility byte
 }
 
 var _ sql.FunctionExpression = (*Field)(nil)
 var _ sql.CollationCoercible = (*Field)(nil)
+var _ sql.CollationCoercibilityResolver = (*Field)(nil)
 
 // NewField creates a new Field UDF.
 func NewField(ctx *sql.Context, args ...sql.Expression) (sql.Expression, error) {
@@ -36,7 +39,19 @@ func NewField(ctx *sql.Context, args ...sql.Expression) (sql.Expression, error) 
 		return nil, sql.ErrInvalidArgumentNumber.New("FIELD", "2 or more", len(args))
 	}
 
-	return &Field{args}, nil
+	return &Field{args: args}, nil
+}
+
+// ResolveCollationCoercibility implements
+// [sql.CollationCoercibilityResolver] over |args|[0].
+func (f *Field) ResolveCollationCoercibility(ctx *sql.Context) error {
+	collation, coercibility, err := sql.ResolveCoercibilityExpressions(ctx, sql.CollationAggregationDefault, f.args[0])
+	if err != nil {
+		return err
+	}
+	f.collation = collation
+	f.coercibility = coercibility
+	return nil
 }
 
 // FunctionName implements sql.FunctionExpression
@@ -56,7 +71,7 @@ func (f *Field) Type(ctx *sql.Context) sql.Type {
 
 // CollationCoercibility implements the interface sql.CollationCoercible.
 func (f *Field) CollationCoercibility(ctx *sql.Context) (sql.CollationID, byte) {
-	return sql.ResolveCoercibilityExpressions(ctx, f.args...)
+	return f.collation, f.coercibility
 }
 
 // IsNullable implements the Expression interface.
@@ -74,8 +89,15 @@ func (f *Field) String() string {
 }
 
 // WithChildren implements the Expression interface.
-func (*Field) WithChildren(ctx *sql.Context, children ...sql.Expression) (sql.Expression, error) {
-	return NewField(ctx, children...)
+func (f *Field) WithChildren(ctx *sql.Context, children ...sql.Expression) (sql.Expression, error) {
+	if len(children) < 2 {
+		return nil, sql.ErrInvalidArgumentNumber.New("FIELD", "2 or more", len(children))
+	}
+	return &Field{
+		args:         children,
+		collation:    f.collation,
+		coercibility: f.coercibility,
+	}, nil
 }
 
 // Resolved implements the Expression interface.

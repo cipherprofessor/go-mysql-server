@@ -88,5 +88,6 @@ const (
 	TrackProcessId                 // trackProcess
 
 	// extra that needs to be added to once before
-	engineOverridesId // engineOverrides
+	engineOverridesId              // engineOverrides
+	resolveCollationCoercibilityId // resolveCollationCoercibility
 )

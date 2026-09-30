@@ -192,17 +192,32 @@ func (r *Repeat) Eval(
 // Replace is a function that returns a string with all occurrences of fromStr replaced by the
 // string toStr
 type Replace struct {
-	str     sql.Expression
-	fromStr sql.Expression
-	toStr   sql.Expression
+	str          sql.Expression
+	fromStr      sql.Expression
+	toStr        sql.Expression
+	collation    sql.CollationID
+	coercibility byte
 }
 
 var _ sql.FunctionExpression = (*Replace)(nil)
 var _ sql.CollationCoercible = (*Replace)(nil)
+var _ sql.CollationCoercibilityResolver = (*Replace)(nil)
 
 // NewReplace creates a new Replace expression.
 func NewReplace(ctx *sql.Context, str sql.Expression, fromStr sql.Expression, toStr sql.Expression) sql.Expression {
-	return &Replace{str, fromStr, toStr}
+	return &Replace{str: str, fromStr: fromStr, toStr: toStr}
+}
+
+// ResolveCollationCoercibility implements
+// [sql.CollationCoercibilityResolver] over |r.str|.
+func (r *Replace) ResolveCollationCoercibility(ctx *sql.Context) error {
+	collation, coercibility, err := sql.ResolveCoercibilityExpressions(ctx, sql.CollationAggregationDefault, r.str)
+	if err != nil {
+		return err
+	}
+	r.collation = collation
+	r.coercibility = coercibility
+	return nil
 }
 
 // FunctionName implements sql.FunctionExpression
@@ -241,7 +256,7 @@ func (r *Replace) Type(ctx *sql.Context) sql.Type {
 
 // CollationCoercibility implements the interface sql.CollationCoercible.
 func (r *Replace) CollationCoercibility(ctx *sql.Context) (sql.CollationID, byte) {
-	return sql.ResolveCoercibilityExpressions(ctx, r.str, r.fromStr, r.toStr)
+	return r.collation, r.coercibility
 }
 
 // WithChildren implements the Expression interface.
@@ -249,7 +264,13 @@ func (r *Replace) WithChildren(ctx *sql.Context, children ...sql.Expression) (sq
 	if len(children) != 3 {
 		return nil, sql.ErrInvalidChildrenNumber.New(r, len(children), 3)
 	}
-	return NewReplace(ctx, children[0], children[1], children[2]), nil
+	return &Replace{
+		str:          children[0],
+		fromStr:      children[1],
+		toStr:        children[2],
+		collation:    r.collation,
+		coercibility: r.coercibility,
+	}, nil
 }
 
 // Eval implements the Expression interface.

@@ -57,8 +57,10 @@ func TestGeneratedUnaryAggregateDescribe(t *testing.T) {
 	ctx := sql.NewEmptyContext()
 	hashIn, err := expression.NewHashInTuple(
 		ctx,
-		expression.NewGetField(0, types.Int64, "x", false),
-		expression.NewTuple(expression.NewLiteral(1, types.Int64)),
+		expression.NewInTuple(
+			expression.NewGetField(0, types.Int64, "x", false),
+			expression.NewTuple(expression.NewLiteral(1, types.Int64)),
+		),
 	)
 	require.NoError(t, err)
 

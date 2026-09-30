@@ -17,6 +17,7 @@ package function
 import (
 	"testing"
 
+	"github.com/dolthub/vitess/go/sqltypes"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dolthub/go-mysql-server/sql"
@@ -126,3 +127,20 @@ func TestReplace(t *testing.T) {
 		})
 	}
 }
+
+func TestReplaceCollationCoercibility(t *testing.T) {
+	// https://github.com/dolthub/dolt/issues/11907
+	ctx := sql.NewEmptyContext()
+	latin1Type := types.MustCreateString(sqltypes.VarChar, 10, sql.Collation_latin1_swedish_ci)
+	str := expression.NewLiteral("a", latin1Type)
+	fromStr := expression.NewLiteral("b", types.LongText)
+	toStr := expression.NewLiteral("c", types.LongText)
+
+	rep := NewReplace(ctx, str, fromStr, toStr)
+	require.NoError(t, rep.(sql.CollationCoercibilityResolver).ResolveCollationCoercibility(ctx))
+
+	col, coer := rep.(sql.CollationCoercible).CollationCoercibility(ctx)
+	require.Equal(t, sql.Collation_latin1_swedish_ci, col)
+	require.Equal(t, byte(4), coer)
+}
+

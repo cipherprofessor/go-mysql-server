@@ -24,11 +24,14 @@ import (
 
 // Concat joins several strings together.
 type Concat struct {
-	args []sql.Expression
+	args         []sql.Expression
+	collation    sql.CollationID
+	coercibility byte
 }
 
 var _ sql.FunctionExpression = (*Concat)(nil)
 var _ sql.CollationCoercible = (*Concat)(nil)
+var _ sql.CollationCoercibilityResolver = (*Concat)(nil)
 
 // NewConcat creates a new Concat UDF.
 func NewConcat(ctx *sql.Context, args ...sql.Expression) (sql.Expression, error) {
@@ -36,7 +39,19 @@ func NewConcat(ctx *sql.Context, args ...sql.Expression) (sql.Expression, error)
 		return nil, sql.ErrInvalidArgumentNumber.New("CONCAT", "1 or more", 0)
 	}
 
-	return &Concat{args}, nil
+	return &Concat{args: args}, nil
+}
+
+// ResolveCollationCoercibility implements
+// [sql.CollationCoercibilityResolver].
+func (c *Concat) ResolveCollationCoercibility(ctx *sql.Context) error {
+	collation, coercibility, err := sql.ResolveCoercibilityExpressions(ctx, sql.CollationAggregationDefault, c.args...)
+	if err != nil {
+		return err
+	}
+	c.collation = collation
+	c.coercibility = coercibility
+	return nil
 }
 
 // FunctionName implements sql.FunctionExpression
@@ -54,7 +69,7 @@ func (c *Concat) Type(ctx *sql.Context) sql.Type { return types.LongText }
 
 // CollationCoercibility implements the interface sql.CollationCoercible.
 func (c *Concat) CollationCoercibility(ctx *sql.Context) (sql.CollationID, byte) {
-	return sql.ResolveCoercibilityExpressions(ctx, c.args...)
+	return c.collation, c.coercibility
 }
 
 // IsNullable implements the Expression interface.
@@ -84,8 +99,15 @@ func (c *Concat) DebugString(ctx *sql.Context) string {
 }
 
 // WithChildren implements the Expression interface.
-func (*Concat) WithChildren(ctx *sql.Context, children ...sql.Expression) (sql.Expression, error) {
-	return NewConcat(ctx, children...)
+func (c *Concat) WithChildren(ctx *sql.Context, children ...sql.Expression) (sql.Expression, error) {
+	if len(children) == 0 {
+		return nil, sql.ErrInvalidArgumentNumber.New("CONCAT", "1 or more", 0)
+	}
+	return &Concat{
+		args:         children,
+		collation:    c.collation,
+		coercibility: c.coercibility,
+	}, nil
 }
 
 // Resolved implements the Expression interface.

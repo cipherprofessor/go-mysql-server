@@ -152,6 +152,7 @@ func TestPadCollationCoercibility(t *testing.T) {
 
 	rpad, err := NewRightPad(ctx, latin1Literal, expression.NewLiteral(int64(3), types.Int64), utf8Literal)
 	require.NoError(t, err)
+	require.NoError(t, rpad.(sql.CollationCoercibilityResolver).ResolveCollationCoercibility(ctx))
 
 	col, coercibility := rpad.(sql.CollationCoercible).CollationCoercibility(ctx)
 	require.Equal(t, sql.Collation_latin1_swedish_ci, col)
@@ -159,6 +160,7 @@ func TestPadCollationCoercibility(t *testing.T) {
 
 	lpad, err := NewLeftPad(ctx, latin1Literal, expression.NewLiteral(int64(3), types.Int64), utf8Literal)
 	require.NoError(t, err)
+	require.NoError(t, lpad.(sql.CollationCoercibilityResolver).ResolveCollationCoercibility(ctx))
 
 	colL, coercibilityL := lpad.(sql.CollationCoercible).CollationCoercibility(ctx)
 	require.Equal(t, sql.Collation_latin1_swedish_ci, colL)
@@ -166,6 +168,7 @@ func TestPadCollationCoercibility(t *testing.T) {
 
 	nestedLpad, err := NewLeftPad(ctx, rpad, expression.NewLiteral(int64(5), types.Int64), utf8Literal)
 	require.NoError(t, err)
+	require.NoError(t, nestedLpad.(sql.CollationCoercibilityResolver).ResolveCollationCoercibility(ctx))
 	colNL, coerNL := nestedLpad.(sql.CollationCoercible).CollationCoercibility(ctx)
 	require.Equal(t, sql.Collation_latin1_swedish_ci, colNL)
 	require.Equal(t, byte(4), coerNL)
@@ -173,14 +176,17 @@ func TestPadCollationCoercibility(t *testing.T) {
 	collated := expression.NewCollatedExpression(latin1Literal, sql.Collation_latin1_bin)
 	colPad, err := NewLeftPad(ctx, collated, expression.NewLiteral(int64(3), types.Int64), utf8Literal)
 	require.NoError(t, err)
+	require.NoError(t, colPad.(sql.CollationCoercibilityResolver).ResolveCollationCoercibility(ctx))
 	colExp, coerExp := colPad.(sql.CollationCoercible).CollationCoercibility(ctx)
 	require.Equal(t, sql.Collation_latin1_bin, colExp)
 	require.Equal(t, byte(0), coerExp)
 
 	concat, err := NewConcat(ctx, latin1Literal, utf8Literal)
 	require.NoError(t, err)
+	require.NoError(t, concat.(sql.CollationCoercibilityResolver).ResolveCollationCoercibility(ctx))
 	padConcat, err := NewRightPad(ctx, concat, expression.NewLiteral(int64(5), types.Int64), utf8Literal)
 	require.NoError(t, err)
+	require.NoError(t, padConcat.(sql.CollationCoercibilityResolver).ResolveCollationCoercibility(ctx))
 	colConcat, coerConcat := padConcat.(sql.CollationCoercible).CollationCoercibility(ctx)
 	expectedCol, expectedCoer := concat.(sql.CollationCoercible).CollationCoercibility(ctx)
 	require.Equal(t, expectedCol, colConcat)
@@ -189,6 +195,7 @@ func TestPadCollationCoercibility(t *testing.T) {
 	sq := plan.NewSubquery(plan.NewProject(ctx, []sql.Expression{latin1Literal}, plan.NewEmptyTableWithSchema(nil)), "")
 	sqPad, err := NewLeftPad(ctx, sq, expression.NewLiteral(int64(3), types.Int64), utf8Literal)
 	require.NoError(t, err)
+	require.NoError(t, sqPad.(sql.CollationCoercibilityResolver).ResolveCollationCoercibility(ctx))
 	colSq, coerSq := sqPad.(sql.CollationCoercible).CollationCoercibility(ctx)
 	require.Equal(t, sql.Collation_binary, colSq)
 	require.Equal(t, byte(7), coerSq)
@@ -204,12 +211,14 @@ func TestPadTranscoding(t *testing.T) {
 	validPad := expression.NewLiteral("é", types.LongText)
 	lpad, err := NewLeftPad(ctx, latin1Str, expression.NewLiteral(int64(3), types.Int64), validPad)
 	require.NoError(t, err)
+	require.NoError(t, lpad.(sql.CollationCoercibilityResolver).ResolveCollationCoercibility(ctx))
 	res, err := lpad.Eval(ctx, nil)
 	require.NoError(t, err)
 	require.Equal(t, "ééa", res)
 
 	rpad, err := NewRightPad(ctx, latin1Str, expression.NewLiteral(int64(3), types.Int64), validPad)
 	require.NoError(t, err)
+	require.NoError(t, rpad.(sql.CollationCoercibilityResolver).ResolveCollationCoercibility(ctx))
 	resR, err := rpad.Eval(ctx, nil)
 	require.NoError(t, err)
 	require.Equal(t, "aéé", resR)
@@ -218,6 +227,7 @@ func TestPadTranscoding(t *testing.T) {
 	invalidPad := expression.NewLiteral("👍", types.LongText)
 	lpadErr, err := NewLeftPad(ctx, latin1Str, expression.NewLiteral(int64(3), types.Int64), invalidPad)
 	require.NoError(t, err)
+	require.NoError(t, lpadErr.(sql.CollationCoercibilityResolver).ResolveCollationCoercibility(ctx))
 	_, err = lpadErr.Eval(ctx, nil)
 	require.Error(t, err)
 	require.True(t, sql.ErrCannotConvertString.Is(err))

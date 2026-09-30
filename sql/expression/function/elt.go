@@ -24,11 +24,14 @@ import (
 
 // Elt joins several strings together.
 type Elt struct {
-	args []sql.Expression
+	args         []sql.Expression
+	collation    sql.CollationID
+	coercibility byte
 }
 
 var _ sql.FunctionExpression = (*Elt)(nil)
 var _ sql.CollationCoercible = (*Elt)(nil)
+var _ sql.CollationCoercibilityResolver = (*Elt)(nil)
 
 // NewElt creates a new Elt UDF.
 func NewElt(ctx *sql.Context, args ...sql.Expression) (sql.Expression, error) {
@@ -36,7 +39,19 @@ func NewElt(ctx *sql.Context, args ...sql.Expression) (sql.Expression, error) {
 		return nil, sql.ErrInvalidArgumentNumber.New("ELT", "2 or more", len(args))
 	}
 
-	return &Elt{args}, nil
+	return &Elt{args: args}, nil
+}
+
+// ResolveCollationCoercibility implements
+// [sql.CollationCoercibilityResolver] over |args|[1:].
+func (e *Elt) ResolveCollationCoercibility(ctx *sql.Context) error {
+	collation, coercibility, err := sql.ResolveCoercibilityExpressions(ctx, sql.CollationAggregationDefault, e.args[1:]...)
+	if err != nil {
+		return err
+	}
+	e.collation = collation
+	e.coercibility = coercibility
+	return nil
 }
 
 // FunctionName implements sql.FunctionExpression
@@ -56,7 +71,7 @@ func (e *Elt) Type(ctx *sql.Context) sql.Type {
 
 // CollationCoercibility implements the interface sql.CollationCoercible.
 func (e *Elt) CollationCoercibility(ctx *sql.Context) (sql.CollationID, byte) {
-	return sql.ResolveCoercibilityExpressions(ctx, e.args...)
+	return e.collation, e.coercibility
 }
 
 // IsNullable implements the Expression interface.
@@ -74,8 +89,15 @@ func (e *Elt) String() string {
 }
 
 // WithChildren implements the Expression interface.
-func (*Elt) WithChildren(ctx *sql.Context, children ...sql.Expression) (sql.Expression, error) {
-	return NewElt(ctx, children...)
+func (e *Elt) WithChildren(ctx *sql.Context, children ...sql.Expression) (sql.Expression, error) {
+	if len(children) < 2 {
+		return nil, sql.ErrInvalidArgumentNumber.New("ELT", "2 or more", len(children))
+	}
+	return &Elt{
+		args:         children,
+		collation:    e.collation,
+		coercibility: e.coercibility,
+	}, nil
 }
 
 // Resolved implements the Expression interface.

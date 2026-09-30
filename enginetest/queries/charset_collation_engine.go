@@ -17,9 +17,9 @@ package queries
 import (
 	"github.com/dolthub/vitess/go/mysql"
 
-	"github.com/dolthub/go-mysql-server/sql/types"
-
 	"github.com/dolthub/go-mysql-server/sql"
+	"github.com/dolthub/go-mysql-server/sql/plan"
+	"github.com/dolthub/go-mysql-server/sql/types"
 )
 
 // CharsetCollationEngineTests are used to ensure that character sets and collations have the correct behavior over the
@@ -1438,6 +1438,96 @@ T.TABLE_SCHEMA AS 'database', T.TABLE_CATALOG AS 'catalog',
 					"         └─ Table\n" +
 					"             ├─ name: pad\n" +
 					"             └─ columns: [id txt]\n",
+			},
+		},
+	},
+	// https://github.com/dolthub/dolt/issues/11907
+	{
+		Name: "IN predicate respects utf8mb4_unicode_ci accent-insensitivity (dolt#11907)",
+		SetUpScript: []string{
+			"CREATE TABLE t (id INT PRIMARY KEY, label VARCHAR(96) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL);",
+			"INSERT INTO t VALUES (1, CONVERT(X'636166C3A9' USING utf8mb4)), (2, 'cafe'), (3, ' Cafe '), (4, 'other'), (5, 'CAFÉ'), (6, 'cafë');",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query:    "SELECT id FROM t WHERE LOWER(TRIM(label)) = 'cafe' ORDER BY id;",
+				Expected: []sql.Row{{1}, {2}, {3}, {5}, {6}},
+			},
+			{
+				Query:    "SELECT id FROM t WHERE LOWER(TRIM(label)) IN ('cafe') ORDER BY id;",
+				Expected: []sql.Row{{1}, {2}, {3}, {5}, {6}},
+			},
+			{
+				Query:    "SELECT id FROM t WHERE LOWER(TRIM(label)) = 'cafe' OR LOWER(TRIM(label)) = 'cafe' ORDER BY id;",
+				Expected: []sql.Row{{1}, {2}, {3}, {5}, {6}},
+			},
+			{
+				Query:    "SELECT id FROM t WHERE label = 'cafe' ORDER BY id;",
+				Expected: []sql.Row{{1}, {2}, {5}, {6}},
+			},
+			{
+				Query:    "SELECT id FROM t WHERE label IN ('cafe') ORDER BY id;",
+				Expected: []sql.Row{{1}, {2}, {5}, {6}},
+			},
+			{
+				Query:    "SELECT id FROM t WHERE label IN ('cafe', 'other') ORDER BY id;",
+				Expected: []sql.Row{{1}, {2}, {4}, {5}, {6}},
+			},
+			{
+				Query:    "SELECT id FROM t WHERE label NOT IN ('cafe', 'other') ORDER BY id;",
+				Expected: []sql.Row{{3}},
+			},
+			{
+				Query:    "SELECT id FROM t WHERE (id, label) IN ((1, 'cafe'), (2, 'cafe'), (4, 'other')) ORDER BY id;",
+				Expected: []sql.Row{{1}, {2}, {4}},
+			},
+			{
+				Query:    "SELECT id FROM t WHERE label IN ('cafe' COLLATE utf8mb4_bin, 'other') ORDER BY id;",
+				Expected: []sql.Row{{2}, {4}},
+			},
+			{
+				Query:    "SELECT id FROM t WHERE id IN ('1' COLLATE utf8mb4_bin, '2' COLLATE utf8mb4_general_ci) ORDER BY id;",
+				Expected: []sql.Row{{1}, {2}},
+			},
+			{
+				Query:    "SELECT id, (label IN ('cafe')) FROM t ORDER BY id;",
+				Expected: []sql.Row{{1, true}, {2, true}, {3, false}, {4, false}, {5, true}, {6, true}},
+			},
+			{
+				Query:    "SELECT id, (label IN ('cafe' COLLATE utf8mb4_bin)) FROM t ORDER BY id;",
+				Expected: []sql.Row{{1, false}, {2, true}, {3, false}, {4, false}, {5, false}, {6, false}},
+			},
+			{
+				Query:    "SELECT id FROM t WHERE CONCAT(label, '') LIKE 'cafe%' ORDER BY id;",
+				Expected: []sql.Row{{1}, {2}, {6}},
+			},
+			{
+				Query:    "SELECT id FROM t WHERE (id, label) IN ((1, 'cafe'), (3, 'other')) ORDER BY id;",
+				Expected: []sql.Row{{1}},
+			},
+			{
+				Query:    "SELECT id FROM t WHERE label NOT IN ('cafe', NULL) ORDER BY id;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query:    "SELECT 0 IN ('abc');",
+				Expected: []sql.Row{{true}},
+			},
+			{
+				Query:    "UPDATE t SET label = 'matched' WHERE label IN ('cafe');",
+				Expected: []sql.Row{{types.OkResult{RowsAffected: 4, Info: plan.UpdateInfo{Matched: 4, Updated: 4}}}},
+			},
+			{
+				Query:    "SELECT id, label FROM t ORDER BY id;",
+				Expected: []sql.Row{{1, "matched"}, {2, "matched"}, {3, " Cafe "}, {4, "other"}, {5, "matched"}, {6, "matched"}},
+			},
+			{
+				Query:    "DELETE FROM t WHERE label IN ('other', 'matched');",
+				Expected: []sql.Row{{types.OkResult{RowsAffected: 5}}},
+			},
+			{
+				Query:    "SELECT id, label FROM t ORDER BY id;",
+				Expected: []sql.Row{{3, " Cafe "}},
 			},
 		},
 	},

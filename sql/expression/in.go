@@ -25,11 +25,14 @@ import (
 // InTuple is an expression that checks an expression is inside a list of expressions.
 type InTuple struct {
 	BinaryExpressionStub
+	cmpCollation    sql.CollationID
+	cmpCoercibility byte
 }
 
 // We implement Comparer because we have a Left() and a Right(), but we can't be Compare()d
 var _ Comparer = (*InTuple)(nil)
 var _ sql.CollationCoercible = (*InTuple)(nil)
+var _ sql.ComparisonCoercible = (*InTuple)(nil)
 
 func (in *InTuple) Compare(ctx *sql.Context, row sql.Row) (int, error) {
 	panic("Compare not implemented for InTuple")
@@ -56,10 +59,45 @@ func (in *InTuple) Right() sql.Expression {
 func NewInTuple(left sql.Expression, right sql.Expression) *InTuple {
 	disableRounding(left)
 	disableRounding(right)
-	return &InTuple{BinaryExpressionStub{left, right}}
+	return &InTuple{BinaryExpressionStub: BinaryExpressionStub{left, right}}
 }
 
-// Eval implements the Expression interface.
+// ComparisonCoercibility returns the comparison collation and
+// coercibility for comparing operands of this InTuple.
+func (in *InTuple) ComparisonCoercibility() (sql.CollationID, byte) {
+	return in.cmpCollation, in.cmpCoercibility
+}
+
+// ResolveComparisonCoercibility implements [sql.ComparisonCoercible].
+func (in *InTuple) ResolveComparisonCoercibility(ctx *sql.Context) error {
+	if !in.Left().Resolved() || !in.Right().Resolved() {
+		return nil
+	}
+	tup, ok := in.Right().(Tuple)
+	if !ok {
+		return nil
+	}
+	if types.IsTuple(in.Left().Type(ctx)) {
+		return nil
+	}
+	if types.IsNumber(in.Left().Type(ctx)) {
+		in.cmpCollation = sql.Collation_binary
+		in.cmpCoercibility = sql.CoercibilityNumeric
+		return nil
+	}
+	collation, coercibility, err := sql.ResolveCoercibilityExpressions(
+		ctx, sql.CollationDisallowNone, append([]sql.Expression{in.Left()}, tup...)...,
+	)
+	if err != nil {
+		return err
+	}
+	in.cmpCollation = collation
+	in.cmpCoercibility = coercibility
+	return nil
+}
+
+
+// Eval implements [sql.Expression].
 func (in *InTuple) Eval(ctx *sql.Context, row sql.Row) (interface{}, error) {
 	lVal, err := in.Left().Eval(ctx, row)
 	if err != nil {
@@ -106,7 +144,14 @@ func (in *InTuple) Eval(ctx *sql.Context, row sql.Row) (interface{}, error) {
 			continue
 		}
 
-		cmpExpr := newComparison(lLit, NewLiteral(rVal, rType))
+		var leftLit, rightLit = lLit, NewLiteral(rVal, rType)
+		leftStr, leftIsText := lType.(sql.StringType)
+		rightStr, rightIsText := rType.(sql.StringType)
+		if leftIsText && rightIsText && types.IsTextOnly(leftStr) && types.IsTextOnly(rightStr) {
+			leftLit = NewLiteral(lVal, types.MustCreateString(leftStr.Type(), leftStr.Length(), in.cmpCollation))
+			rightLit = NewLiteral(rVal, types.MustCreateString(rightStr.Type(), rightStr.Length(), in.cmpCollation))
+		}
+		cmpExpr := newComparison(leftLit, rightLit)
 		res, cErr := cmpExpr.Compare(ctx, nil)
 		if cErr != nil {
 			// If res != 0, then the comparison is false even if the input contained a NULL.
@@ -136,7 +181,10 @@ func (in *InTuple) WithChildren(ctx *sql.Context, children ...sql.Expression) (s
 	if len(children) != 2 {
 		return nil, sql.ErrInvalidChildrenNumber.New(in, len(children), 2)
 	}
-	return NewInTuple(children[0], children[1]), nil
+	ret := NewInTuple(children[0], children[1])
+	ret.cmpCollation = in.cmpCollation
+	ret.cmpCoercibility = in.cmpCoercibility
+	return ret, nil
 }
 
 func (in *InTuple) String() string {
@@ -173,23 +221,27 @@ type HashInTuple struct {
 
 var _ Comparer = (*HashInTuple)(nil)
 var _ sql.CollationCoercible = (*HashInTuple)(nil)
+
 var _ sql.Describable = (*HashInTuple)(nil)
 var _ sql.Expression = (*HashInTuple)(nil)
 
-// NewHashInTuple creates an InTuple expression.
-func NewHashInTuple(ctx *sql.Context, left, right sql.Expression) (*HashInTuple, error) {
-	rightTup, ok := right.(Tuple)
+// NewHashInTuple creates a HashInTuple expression from |in|.
+//
+// It reuses comparison collation and coercibility resolved on |in|
+// and builds an in-memory hash set for static elements in its right tuple.
+func NewHashInTuple(ctx *sql.Context, in *InTuple) (*HashInTuple, error) {
+	rightTup, ok := in.Right().(Tuple)
 	if !ok {
-		return nil, ErrUnsupportedInOperand.New(right)
+		return nil, ErrUnsupportedInOperand.New(in.Right())
 	}
 
-	cmp, cmpType, hasNull, hasTupleNull, err := newInMap(ctx, left.Type(ctx), rightTup)
+	cmp, cmpType, hasNull, hasTupleNull, err := newInMap(ctx, in.Left().Type(ctx), in.cmpCollation, rightTup)
 	if err != nil {
 		return nil, err
 	}
 
 	return &HashInTuple{
-		in:           NewInTuple(left, right),
+		in:           in,
 		cmp:          cmp,
 		cmpType:      cmpType,
 		hasNull:      hasNull,
@@ -197,14 +249,12 @@ func NewHashInTuple(ctx *sql.Context, left, right sql.Expression) (*HashInTuple,
 	}, nil
 }
 
-// newInMap hashes static expressions in the right child Tuple of a InTuple node
-// returns
-//   - map of the hashed elements
-//   - sql.Type to convert elements to before hashing
-//   - bool indicating if there are scalar NULL elements
-//   - bool indicating if there are tuple elements containing NULL
-//   - error
-func newInMap(ctx *sql.Context, lType sql.Type, right Tuple) (map[uint64]struct{}, sql.Type, bool, bool, error) {
+// newInMap builds a lookup map from static expressions in |right|.
+//
+// It returns a hash set of non-null values converted according to
+// |lType| and |cmpCollation|, alongside booleans indicating if scalar
+// NULL or tuple NULL values were encountered.
+func newInMap(ctx *sql.Context, lType sql.Type, cmpCollation sql.CollationID, right Tuple) (map[uint64]struct{}, sql.Type, bool, bool, error) {
 	if lType == types.Null {
 		return nil, nil, true, false, nil
 	}
@@ -248,6 +298,9 @@ func newInMap(ctx *sql.Context, lType sql.Type, right Tuple) (map[uint64]struct{
 		// If we've made it this far, we are guaranteed that the right Tuple has a consistent set of types
 		// (all numeric, string, or time), so it is enough to just compare against the first element of the right Tuple
 		cmpType = types.GetCompareType(lType, right[0].Type(ctx))
+		if stringCompareType, ok := cmpType.(sql.StringType); ok && types.IsTextOnly(stringCompareType) {
+			cmpType = types.MustCreateString(stringCompareType.Type(), stringCompareType.Length(), cmpCollation)
+		}
 	}
 	elements := map[uint64]struct{}{}
 	for _, rVal := range rVals {
@@ -273,6 +326,13 @@ func (hit *HashInTuple) Eval(ctx *sql.Context, row sql.Row) (interface{}, error)
 	}
 	if containsNull(leftVal) {
 		return hit.in.Eval(ctx, row)
+	}
+
+	if hit.cmpType == nil {
+		if hit.hasNull {
+			return nil, nil
+		}
+		return false, nil
 	}
 
 	key, inRange, err := hash.HashOfSimple(ctx, leftVal, hit.cmpType)

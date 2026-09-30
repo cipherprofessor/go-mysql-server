@@ -50,6 +50,7 @@ var OnceBeforeDefault = []Rule{
 	{Id: validateReadOnlyTransactionId, Apply: validateReadOnlyTransaction},
 	{Id: validateDatabaseSetId, Apply: validateDatabaseSet},
 	{Id: validateDeleteFromId, Apply: validateDeleteFrom},
+	{Id: resolveCollationCoercibilityId, Apply: resolveCollationCoercibility},
 	{Id: simplifyFiltersId, Apply: simplifyFilters}, //TODO inline?
 	{Id: pushNotFiltersId, Apply: pushNotFilters},   //TODO inline?
 	{Id: validateGroupById, Apply: validateGroupBy},

@@ -27,11 +27,14 @@ import (
 // the strings to be concatenated. The separator can be a string, as can the
 // rest of the arguments. If the separator is NULL, the result is NULL.
 type ConcatWithSeparator struct {
-	args []sql.Expression
+	args         []sql.Expression
+	collation    sql.CollationID
+	coercibility byte
 }
 
 var _ sql.FunctionExpression = (*ConcatWithSeparator)(nil)
 var _ sql.CollationCoercible = (*ConcatWithSeparator)(nil)
+var _ sql.CollationCoercibilityResolver = (*ConcatWithSeparator)(nil)
 
 // NewConcatWithSeparator creates a new NewConcatWithSeparator UDF.
 func NewConcatWithSeparator(ctx *sql.Context, args ...sql.Expression) (sql.Expression, error) {
@@ -39,7 +42,19 @@ func NewConcatWithSeparator(ctx *sql.Context, args ...sql.Expression) (sql.Expre
 		return nil, sql.ErrInvalidArgumentNumber.New("CONCAT_WS", "1 or more", 0)
 	}
 
-	return &ConcatWithSeparator{args}, nil
+	return &ConcatWithSeparator{args: args}, nil
+}
+
+// ResolveCollationCoercibility implements
+// [sql.CollationCoercibilityResolver].
+func (c *ConcatWithSeparator) ResolveCollationCoercibility(ctx *sql.Context) error {
+	collation, coercibility, err := sql.ResolveCoercibilityExpressions(ctx, sql.CollationAggregationDefault, c.args...)
+	if err != nil {
+		return err
+	}
+	c.collation = collation
+	c.coercibility = coercibility
+	return nil
 }
 
 // FunctionName implements sql.FunctionExpression
@@ -57,7 +72,7 @@ func (f *ConcatWithSeparator) Type(ctx *sql.Context) sql.Type { return types.Lon
 
 // CollationCoercibility implements the interface sql.CollationCoercible.
 func (c *ConcatWithSeparator) CollationCoercibility(ctx *sql.Context) (sql.CollationID, byte) {
-	return sql.ResolveCoercibilityExpressions(ctx, c.args...)
+	return c.collation, c.coercibility
 }
 
 // IsNullable implements the Expression interface.
@@ -74,8 +89,15 @@ func (f *ConcatWithSeparator) String() string {
 }
 
 // WithChildren implements the Expression interface.
-func (*ConcatWithSeparator) WithChildren(ctx *sql.Context, children ...sql.Expression) (sql.Expression, error) {
-	return NewConcatWithSeparator(ctx, children...)
+func (c *ConcatWithSeparator) WithChildren(ctx *sql.Context, children ...sql.Expression) (sql.Expression, error) {
+	if len(children) == 0 {
+		return nil, sql.ErrInvalidArgumentNumber.New("CONCAT_WS", "1 or more", 0)
+	}
+	return &ConcatWithSeparator{
+		args:         children,
+		collation:    c.collation,
+		coercibility: c.coercibility,
+	}, nil
 }
 
 // Resolved implements the Expression interface.

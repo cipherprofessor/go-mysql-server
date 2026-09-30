@@ -49,6 +49,27 @@ type CollationCoercible interface {
 	CollationCoercibility(ctx *Context) (collation CollationID, coercibility byte)
 }
 
+// ComparisonCoercible represents an expression that resolves and
+// reports comparison collation and coercibility.
+type ComparisonCoercible interface {
+	// ResolveComparisonCoercibility resolves and stores comparison
+	// collation and coercibility across operands during analysis.
+	ResolveComparisonCoercibility(ctx *Context) error
+	// ComparisonCoercibility returns the resolved comparison
+	// collation and coercibility for this expression.
+	ComparisonCoercibility() (collation CollationID, coercibility byte)
+}
+
+// CollationCoercibilityResolver is an optional interface
+// implemented by expressions that resolve and store their collation
+// and coercibility during analysis.
+type CollationCoercibilityResolver interface {
+	// ResolveCollationCoercibility resolves and stores dominant
+	// collation and coercibility across operands during statement
+	// analysis.
+	ResolveCollationCoercibility(ctx *Context) error
+}
+
 // ResolveCoercibility returns the dominant collation and coercibility
 // between two operands according to coercibility rules.
 //
@@ -176,15 +197,37 @@ func GetCoercibility(ctx *Context, nodeOrExpr interface{}) (collation CollationI
 	return collation, coercibility
 }
 
+// CollationAggregationFlags controls aggregation behaviors when
+// resolving collations across multiple expressions.
+type CollationAggregationFlags uint
+
+const (
+	// CollationAggregationDefault represents default aggregation
+	// without strict constraints.
+	CollationAggregationDefault CollationAggregationFlags = 0
+
+	// CollationDisallowNone disallows CoercibilityNone and returns
+	// ErrCollationIllegalMix for comparison operations.
+	CollationDisallowNone CollationAggregationFlags = 1 << 2
+)
+
+// DisallowNone reports whether CollationDisallowNone is set on |f|.
+func (f CollationAggregationFlags) DisallowNone() bool {
+	return (f & CollationDisallowNone) != 0
+}
+
 // ResolveCoercibilityExpressions returns the combined collation and
-// coercibility across a slice of expressions.
+// coercibility across |exprs| under |flags|.
 //
-// It evaluates each expression in order and reduces them using
-// ResolveCoercibility. Empty slices return Collation_binary with
-// CoercibilityIgnorable.
-func ResolveCoercibilityExpressions(ctx *Context, exprs ...Expression) (CollationID, byte) {
+// See ResolveCoercibility.
+//
+// When |flags| has CollationDisallowNone set and the resulting
+// coercibility is CoercibilityNone, it returns
+// ErrCollationIllegalMix. Empty slices return Collation_binary
+// with CoercibilityIgnorable.
+func ResolveCoercibilityExpressions(ctx *Context, flags CollationAggregationFlags, exprs ...Expression) (CollationID, byte, error) {
 	if len(exprs) == 0 {
-		return Collation_binary, CoercibilityIgnorable
+		return Collation_binary, CoercibilityIgnorable, nil
 	}
 	// TODO(#3829): Support MY_COLL_ALLOW_NUMERIC_CONV in string
 	// functions when all arguments are numeric.
@@ -195,5 +238,13 @@ func ResolveCoercibilityExpressions(ctx *Context, exprs ...Expression) (Collatio
 			collation, coercibility, nextCollation, nextCoercibility,
 		)
 	}
-	return collation, coercibility
+	if flags.DisallowNone() && coercibility == CoercibilityNone {
+		if len(exprs) >= 2 {
+			leftCol, _ := GetCoercibility(ctx, exprs[0])
+			rightCol, _ := GetCoercibility(ctx, exprs[1])
+			return Collation_Unspecified, CoercibilityNone, ErrCollationIllegalMix.New(leftCol.Name(), rightCol.Name())
+		}
+		return Collation_Unspecified, CoercibilityNone, ErrCollationIllegalMix.New(collation.Name(), "")
+	}
+	return collation, coercibility, nil
 }

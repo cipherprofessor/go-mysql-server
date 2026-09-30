@@ -56,7 +56,18 @@ func (l *LeftPad) String() string {
 
 // WithChildren implements [sql.Expression].
 func (l *LeftPad) WithChildren(ctx *sql.Context, children ...sql.Expression) (sql.Expression, error) {
-	return NewLeftPad(ctx, children...)
+	if len(children) != 3 {
+		return nil, sql.ErrInvalidArgumentNumber.New("lpad", "3", len(children))
+	}
+	return &LeftPad{
+		pad: pad{
+			str:          children[0],
+			length:       children[1],
+			padStr:       children[2],
+			collation:    l.collation,
+			coercibility: l.coercibility,
+		},
+	}, nil
 }
 
 // Eval implements [sql.Expression].
@@ -98,7 +109,18 @@ func (r *RightPad) String() string {
 
 // WithChildren implements [sql.Expression].
 func (r *RightPad) WithChildren(ctx *sql.Context, children ...sql.Expression) (sql.Expression, error) {
-	return NewRightPad(ctx, children...)
+	if len(children) != 3 {
+		return nil, sql.ErrInvalidArgumentNumber.New("rpad", "3", len(children))
+	}
+	return &RightPad{
+		pad: pad{
+			str:          children[0],
+			length:       children[1],
+			padStr:       children[2],
+			collation:    r.collation,
+			coercibility: r.coercibility,
+		},
+	}, nil
 }
 
 // Eval implements [sql.Expression].
@@ -109,9 +131,26 @@ func (r *RightPad) Eval(ctx *sql.Context, row sql.Row) (interface{}, error) {
 // pad is the base expression for LPAD and RPAD string padding
 // functions.
 type pad struct {
-	str    sql.Expression
-	length sql.Expression
-	padStr sql.Expression
+	str          sql.Expression
+	length       sql.Expression
+	padStr       sql.Expression
+	collation    sql.CollationID
+	coercibility byte
+}
+
+var _ sql.CollationCoercibilityResolver = (*LeftPad)(nil)
+var _ sql.CollationCoercibilityResolver = (*RightPad)(nil)
+
+// ResolveCollationCoercibility implements
+// [sql.CollationCoercibilityResolver].
+func (p *pad) ResolveCollationCoercibility(ctx *sql.Context) error {
+	collation, coercibility, err := sql.ResolveCoercibilityExpressions(ctx, sql.CollationAggregationDefault, p.str)
+	if err != nil {
+		return err
+	}
+	p.collation = collation
+	p.coercibility = coercibility
+	return nil
 }
 
 // Children implements [sql.Expression].
@@ -143,7 +182,7 @@ func (p *pad) Type(ctx *sql.Context) sql.Type {
 // returns the collation and coercibility of the string expression,
 // deriving them solely from the first argument.
 func (p *pad) CollationCoercibility(ctx *sql.Context) (collation sql.CollationID, coercibility byte) {
-	return sql.ResolveCoercibilityExpressions(ctx, p.str)
+	return p.collation, p.coercibility
 }
 
 func (p *pad) eval(ctx *sql.Context, row sql.Row, isLeft bool) (interface{}, error) {

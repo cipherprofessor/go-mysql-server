@@ -26,7 +26,7 @@ func TestApplyHashIn(t *testing.T) {
 		{Name: "d", Type: types.MustCreateStringWithDefaults(sqltypes.VarChar, 20), Source: "foo"},
 	}), nil)
 
-	hitLiteral, _ := expression.NewHashInTuple(
+	hitLiteral := mustNewHashInTuple(
 		ctx,
 		expression.NewGetField(0, types.Int64, "foo", false),
 		expression.NewTuple(
@@ -36,7 +36,7 @@ func TestApplyHashIn(t *testing.T) {
 		),
 	)
 
-	hitTuple, _ := expression.NewHashInTuple(
+	hitTuple := mustNewHashInTuple(
 		ctx,
 		expression.NewTuple(
 			expression.NewGetField(0, types.Int64, "a", false),
@@ -49,7 +49,7 @@ func TestApplyHashIn(t *testing.T) {
 		),
 	)
 
-	hitHeteroTuple, _ := expression.NewHashInTuple(
+	hitHeteroTuple := mustNewHashInTuple(
 		ctx,
 		expression.NewTuple(
 			expression.NewGetField(0, types.Int64, "a", false),
@@ -598,7 +598,7 @@ func TestApplyHashIn(t *testing.T) {
 }
 
 func mustNewHashInTuple(ctx *sql.Context, left, right sql.Expression) *expression.HashInTuple {
-	hin, err := expression.NewHashInTuple(ctx, left, right)
+	hin, err := expression.NewHashInTuple(ctx, expression.NewInTuple(left, right))
 	if err != nil {
 		panic(err)
 	}

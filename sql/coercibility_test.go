@@ -34,14 +34,16 @@ func TestResolveCoercibility(t *testing.T) {
 	ctx := NewEmptyContext()
 
 	t.Run("empty expressions", func(t *testing.T) {
-		col, coer := ResolveCoercibilityExpressions(ctx)
+		col, coer, err := ResolveCoercibilityExpressions(ctx, CollationAggregationDefault)
+		require.NoError(t, err)
 		require.Equal(t, Collation_binary, col)
 		require.Equal(t, CoercibilityIgnorable, coer)
 	})
 
 	t.Run("single expression", func(t *testing.T) {
 		e := dummyCoercibleExpr{collation: Collation_latin1_swedish_ci, coercibility: CoercibilityCoercible}
-		col, coer := ResolveCoercibilityExpressions(ctx, e)
+		col, coer, err := ResolveCoercibilityExpressions(ctx, CollationAggregationDefault, e)
+		require.NoError(t, err)
 		require.Equal(t, Collation_latin1_swedish_ci, col)
 		require.Equal(t, CoercibilityCoercible, coer)
 	})
@@ -49,7 +51,8 @@ func TestResolveCoercibility(t *testing.T) {
 	t.Run("multiple expressions", func(t *testing.T) {
 		e1 := dummyCoercibleExpr{collation: Collation_latin1_swedish_ci, coercibility: CoercibilityCoercible}
 		e2 := dummyCoercibleExpr{collation: Collation_utf8mb4_0900_ai_ci, coercibility: CoercibilityNumeric}
-		col, coer := ResolveCoercibilityExpressions(ctx, e1, e2)
+		col, coer, err := ResolveCoercibilityExpressions(ctx, CollationAggregationDefault, e1, e2)
+		require.NoError(t, err)
 		require.Equal(t, Collation_latin1_swedish_ci, col)
 		require.Equal(t, CoercibilityCoercible, coer)
 	})
@@ -109,5 +112,22 @@ func TestResolveCoercibility(t *testing.T) {
 		require.True(t, Collation_latin1_bin.IsBinary())
 		require.False(t, Collation_utf8mb4_0900_ai_ci.IsBinary())
 		require.False(t, Collation_latin1_swedish_ci.IsBinary())
+	})
+
+	t.Run("ResolveCoercibilityExpressions with CollationDisallowNone", func(t *testing.T) {
+		e1 := dummyCoercibleExpr{collation: Collation_latin1_general_ci, coercibility: CoercibilityImplicit}
+		e2 := dummyCoercibleExpr{collation: Collation_latin1_german1_ci, coercibility: CoercibilityImplicit}
+
+		col, coer, err := ResolveCoercibilityExpressions(ctx, CollationAggregationDefault, e1, e2)
+		require.NoError(t, err)
+		require.Equal(t, Collation_latin1_bin, col)
+		require.Equal(t, CoercibilityNone, coer)
+
+		col, coer, err = ResolveCoercibilityExpressions(ctx, CollationDisallowNone, e1, e2)
+		require.Error(t, err)
+		require.True(t, ErrCollationIllegalMix.Is(err))
+		require.Equal(t, Collation_Unspecified, col)
+		require.Equal(t, CoercibilityNone, coer)
+
 	})
 }

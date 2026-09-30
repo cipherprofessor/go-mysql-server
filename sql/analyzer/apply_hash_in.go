@@ -31,7 +31,7 @@ func applyHashIn(ctx *sql.Context, a *Analyzer, n sql.Node, scope *plan.Scope, s
 
 		e, same, err := transform.Expr(ctx, filter.Expression, func(ctx *sql.Context, expr sql.Expression) (sql.Expression, transform.TreeIdentity, error) {
 			if e, ok := expr.(*expression.InTuple); ok && hasSingleOutput(ctx, e.Left()) && isStatic(ctx, e.Right()) && isConsistentType(ctx, e.Right()) {
-				newe, err := expression.NewHashInTuple(ctx, e.Left(), e.Right())
+				newe, err := expression.NewHashInTuple(ctx, e)
 				if err != nil {
 					return nil, transform.SameTree, err
 				}

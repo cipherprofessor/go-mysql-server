@@ -17,6 +17,7 @@ package function
 import (
 	"testing"
 
+	"github.com/dolthub/vitess/go/sqltypes"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dolthub/go-mysql-server/sql"
@@ -118,4 +119,21 @@ func TestField(t *testing.T) {
 			require.Equal(t, tt.exp, res)
 		})
 	}
+}
+
+func TestFieldCollationCoercibility(t *testing.T) {
+	// https://github.com/dolthub/dolt/issues/11907
+	ctx := sql.NewEmptyContext()
+	latin1Type := types.MustCreateString(sqltypes.VarChar, 10, sql.Collation_latin1_swedish_ci)
+	target := expression.NewLiteral("a", latin1Type)
+	choice1 := expression.NewLiteral("b", types.LongText)
+	choice2 := expression.NewLiteral("c", types.LongText)
+
+	field, err := NewField(ctx, target, choice1, choice2)
+	require.NoError(t, err)
+	require.NoError(t, field.(sql.CollationCoercibilityResolver).ResolveCollationCoercibility(ctx))
+
+	col, coer := field.(sql.CollationCoercible).CollationCoercibility(ctx)
+	require.Equal(t, sql.Collation_latin1_swedish_ci, col)
+	require.Equal(t, byte(4), coer)
 }
