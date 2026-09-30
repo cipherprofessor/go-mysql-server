@@ -1682,6 +1682,55 @@ SELECT * FROM cte WHERE  d = 2;`,
 		Query:    `SELECT DISTINCT val FROM (values row(null), row(1.00), row('2'), row(2)) a (val);`,
 		Expected: []sql.Row{{nil}, {"1.00"}, {"2"}},
 	},
+	// https://github.com/dolthub/dolt/issues/11942
+	{
+		Query:    `SELECT * FROM (VALUES ROW(CAST(NULL AS DECIMAL(20,6)))) AS t(x);`,
+		Expected: []sql.Row{{nil}},
+	},
+	{
+		Query:    `SELECT * FROM (VALUES ROW(CAST(NULL AS DECIMAL(20,6))), ROW(1.23)) AS t(x);`,
+		Expected: []sql.Row{{nil}, {"1.230000"}},
+	},
+	{
+		Query:    `SELECT * FROM (VALUES ROW(1.23), ROW(CAST(NULL AS DECIMAL(20,6)))) AS t(x);`,
+		Expected: []sql.Row{{"1.230000"}, {nil}},
+	},
+	{
+		Query:    `SELECT * FROM (VALUES ROW(NULL), ROW(CAST(NULL AS DECIMAL(20,6)))) AS t(x);`,
+		Expected: []sql.Row{{nil}, {nil}},
+	},
+	{
+		Query:    `SELECT * FROM (VALUES ROW(1.23), ROW(NULL)) AS t(x);`,
+		Expected: []sql.Row{{"1.23"}, {nil}},
+	},
+	{
+		Query:    `SELECT * FROM (VALUES ROW(1), ROW(CAST(NULL AS DECIMAL(20,6)))) AS t(x);`,
+		Expected: []sql.Row{{"1.000000"}, {nil}},
+	},
+	{
+		Query:    `SELECT * FROM (VALUES ROW(CAST(NULL AS DECIMAL(10,2)), 1), ROW(3.1415, CAST(NULL AS DECIMAL(20,6)))) AS t(a, b);`,
+		Expected: []sql.Row{{nil, "1.000000"}, {"3.1415", nil}},
+	},
+	{
+		Query:    `SELECT * FROM (VALUES ROW(CAST(NULL AS DECIMAL(10,2)) + 1.5)) AS t(x);`,
+		Expected: []sql.Row{{nil}},
+	},
+	{
+		Query:    `SELECT * FROM (VALUES ROW(CASE WHEN 1=0 THEN 1.0 ELSE NULL END)) AS t(x);`,
+		Expected: []sql.Row{{nil}},
+	},
+	{
+		Query:    `SELECT * FROM (VALUES ROW(COALESCE(NULL, CAST(NULL AS DECIMAL(10,2))))) AS t(x);`,
+		Expected: []sql.Row{{nil}},
+	},
+	{
+		Query:    `SELECT * FROM (VALUES ROW(CAST(1234.5 AS DECIMAL(8,2))), ROW(CAST(NULL AS DECIMAL(8,4)))) AS t(x);`,
+		Expected: []sql.Row{{"1234.5000"}, {nil}},
+	},
+	{
+		Query:    `SELECT * FROM (VALUES ROW(CAST(NULL AS DECIMAL(8,4))), ROW(CAST(1234.5 AS DECIMAL(8,2)))) AS t(x);`,
+		Expected: []sql.Row{{nil}, {"1234.5000"}},
+	},
 	{
 		Query:    `SELECT column_0 FROM (values row(1+1.5,2+2), row(floor(1.5),concat("a","b"))) a order by 1;`,
 		Expected: []sql.Row{{"1.0"}, {"2.5"}},
@@ -3753,6 +3802,10 @@ SELECT * FROM cte WHERE  d = 2;`,
 	{
 		Query:    `select STR_TO_DATE('01,5,2013 09:30:17','%d,%m,%Y %h:%i:%s') % 12345;`,
 		Expected: []sql.Row{{"10487"}},
+	},
+	{
+		Query:    `select STR_TO_DATE(UNHEX('30312c352c323031332030393a33303a3137'), '%d,%m,%Y %h:%i:%s');`,
+		Expected: []sql.Row{{time.Date(2013, time.May, 1, 9, 30, 17, 0, time.UTC)}},
 	},
 
 	{
@@ -6853,6 +6906,14 @@ SELECT * FROM cte WHERE  d = 2;`,
 		Expected: []sql.Row{{nil}},
 	},
 	{
+		Query:    `SELECT DISTINCT 37, 40 * - + CASE - - CAST( + COUNT( 59 ) AS DECIMAL ) WHEN - - 96 * - 48 / - 89 * + 32 THEN - ( 32 ) WHEN + 92 / + 93 THEN + ( 7 ) ELSE 8 * - ( - CAST( NULL AS SIGNED ) * 89 ) - ( + 28 ) END AS col1`,
+		Expected: []sql.Row{{37, nil}},
+	},
+	{
+		Query:    "select cast(1 as decimal) = 0.9892, cast(1 as decimal) = 92/93, 92/93 = cast(1 as decimal), cast(1 as decimal) = 0.9892e0, cast(1 as decimal) > 0.9892, cast(1 as decimal) = 1.0",
+		Expected: []sql.Row{{false, false, false, false, true, true}},
+	},
+	{
 		Query: "select cast(X'9876543210' as char(10))",
 		Expected: []sql.Row{
 			{nil},
@@ -8666,6 +8727,13 @@ from typestable`,
 		},
 	},
 	{
+		// https://github.com/dolthub/dolt/issues/11918
+		Query:                 "SELECT COUNT( * ) FROM (SELECT 25 AS age UNION ALL SELECT 30) t WHERE ROUND( HEX( age ) );",
+		Expected:              []sql.Row{{2}},
+		ExpectedWarning:       1292,
+		ExpectedWarningsCount: 1,
+	},
+	{
 		Query: "select 1 in (null, 0.8)",
 		Expected: []sql.Row{
 			{nil},
@@ -9592,6 +9660,31 @@ from typestable`,
 	{
 		Query:    "select pk, (select max(pk) from one_pk where pk < opk.pk) as x from one_pk opk",
 		Expected: []sql.Row{{0, nil}, {1, 0}, {2, 1}, {3, 2}},
+	},
+	// Correlated columns in subqueries are included in select dependencies when the outer query joins
+	{
+		Query:    "select mt.s, (select count(*) from othertable where i2 <= mt.i) as x from mytable mt left join othertable ot on mt.i = ot.i2 where mt.i = 2 group by mt.i, mt.s",
+		Expected: []sql.Row{{"second row", 2}},
+	},
+	{
+		Query:    "select mt.s, count(ot.s2), (select count(*) from othertable where i2 <= mt.i) as x from mytable mt join othertable ot on mt.i = ot.i2 where mt.i = 2 group by mt.i, mt.s",
+		Expected: []sql.Row{{"second row", 1, 2}},
+	},
+	{
+		Query:    "select mt.s, count(distinct ot.s2), (select count(*) from othertable where i2 <= mt.i) as x from mytable mt left join othertable ot on mt.i = ot.i2 where mt.i = 2",
+		Expected: []sql.Row{{"second row", 1, 2}},
+	},
+	{
+		Query:    "select mt.i, (select count(*) from othertable where i2 <= mt.i) as x from mytable mt join othertable ot on mt.i = ot.i2 group by mt.i order by mt.i",
+		Expected: []sql.Row{{1, 1}, {2, 2}, {3, 3}},
+	},
+	{
+		Query:    "select mt.s, (select count(*) from othertable where i2 <= mt.i) as x from mytable mt left join othertable ot on mt.i = ot.i2 group by mt.i, mt.s order by mt.i",
+		Expected: []sql.Row{{"first row", 1}, {"second row", 2}, {"third row", 3}},
+	},
+	{
+		Query:    "select mt.s, (select count(*) from mytable inner_mt where inner_mt.i <= ot.i2) as x from mytable mt left join othertable ot on mt.i = ot.i2 and ot.i2 = 2 group by mt.i, mt.s, ot.i2 order by mt.i",
+		Expected: []sql.Row{{"first row", 0}, {"second row", 2}, {"third row", 0}},
 	},
 	{
 		// https://github.com/dolthub/dolt/issues/9963
@@ -10644,16 +10737,16 @@ var ErrorQueries = []QueryErrorTest{
 		ExpectedErr: sql.ErrColumnNotFound,
 	},
 	{
-		Query:          "CREATE TABLE invalid_decimal (number DECIMAL(65,31));",
-		ExpectedErrStr: "Too big scale 31 specified. Maximum is 30.",
+		Query:       "CREATE TABLE invalid_decimal (number DECIMAL(65,31));",
+		ExpectedErr: sql.ErrTooBigScale,
 	},
 	{
-		Query:          "CREATE TABLE invalid_decimal (number DECIMAL(66,30));",
-		ExpectedErrStr: "Too big precision 66 specified. Maximum is 65.",
+		Query:       "CREATE TABLE invalid_decimal (number DECIMAL(66,30));",
+		ExpectedErr: sql.ErrTooBigPrecision,
 	},
 	{
-		Query:          "CREATE TABLE invalid_decimal (number DECIMAL(66,31));",
-		ExpectedErrStr: "Too big scale 31 specified. Maximum is 30.",
+		Query:       "CREATE TABLE invalid_decimal (number DECIMAL(66,31));",
+		ExpectedErr: sql.ErrTooBigScale,
 	},
 	{
 		Query:       "select 18446744073709551615 div 0.1;",
@@ -10802,6 +10895,19 @@ var ErrorQueries = []QueryErrorTest{
 	{
 		Query:       `select s from mytable group by s order by i`,
 		ExpectedErr: analyzererrors.ErrValidationGroupByOrderBy,
+	}, {
+		Query:       "SELECT CAST('2020-01-01 10:00:00' AS DATETIME(7))",
+		ExpectedErr: sql.ErrTooBigPrecision,
+	},
+	{
+		Query:       "SELECT CAST('10:00:00' AS TIME(7))",
+		ExpectedErr: sql.ErrTooBigPrecision,
+	},
+	{
+		// A grouping key that fails while more rows are waiting to be grouped than the grouping buffers must return
+		// the error rather than hang. The key is slow to compute so that the rows pile up before it fails.
+		Query:       "select count(*) from mytable a, mytable b, mytable c, mytable d, mytable e, mytable f group by json_extract(concat('[', length(repeat(a.i, 10000000))), '$')",
+		ExpectedErr: sql.ErrInvalidJSONText,
 	},
 }
 

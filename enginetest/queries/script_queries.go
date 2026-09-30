@@ -290,6 +290,83 @@ var ScriptTests = []ScriptTest{
 		},
 	},
 	{
+		// https://github.com/dolthub/dolt/issues/11906
+		Name:    "cast out-of-range bigint unsigned to signed",
+		Dialect: "mysql",
+		SetUpScript: []string{
+			"CREATE TABLE t0 (id INT PRIMARY KEY, c0 BIGINT UNSIGNED NULL);",
+			"INSERT INTO t0 VALUES (1, 18446744073709551615), (2, 9223372036854775808), (3, 9223372036854775807), (4, 1), (5, NULL);",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query:    "SELECT CAST(CAST(18446744073709551615 AS UNSIGNED) AS SIGNED);",
+				Expected: []sql.Row{{int64(-1)}},
+			},
+			{
+				Query:    "SELECT CAST(CAST(9223372036854775808 AS UNSIGNED) AS SIGNED);",
+				Expected: []sql.Row{{int64(-9223372036854775808)}},
+			},
+			{
+				Query:    "SELECT CAST(CAST(9223372036854775807 AS UNSIGNED) AS SIGNED);",
+				Expected: []sql.Row{{int64(9223372036854775807)}},
+			},
+			{
+				Query: "SELECT id, CAST(c0 AS SIGNED) FROM t0 ORDER BY id;",
+				Expected: []sql.Row{
+					{1, int64(-1)},
+					{2, int64(-9223372036854775808)},
+					{3, int64(9223372036854775807)},
+					{4, int64(1)},
+					{5, nil},
+				},
+			},
+			{
+				Query:    "SELECT id FROM t0 WHERE CAST(c0 AS SIGNED) < 0 ORDER BY id;",
+				Expected: []sql.Row{{1}, {2}},
+			},
+		},
+	},
+	{
+		Name:    "cast out-of-range integer strings to signed",
+		Dialect: "mysql",
+		SetUpScript: []string{
+			"CREATE TABLE t0 (id INT PRIMARY KEY, c0 VARCHAR(30));",
+			"INSERT INTO t0 VALUES (1, '18446744073709551615'), (2, '9223372036854775808'), (3, '9223372036854775807'), (4, NULL);",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query:                           "SELECT CAST('18446744073709551615' AS SIGNED);",
+				Expected:                        []sql.Row{{int64(-1)}},
+				ExpectedWarning:                 1105,
+				ExpectedWarningsCount:           1,
+				ExpectedWarningMessageSubstring: "negative complement",
+			},
+			{
+				Query:                 "SELECT CONVERT('9223372036854775808', SIGNED);",
+				Expected:              []sql.Row{{int64(-9223372036854775808)}},
+				ExpectedWarning:       1105,
+				ExpectedWarningsCount: 1,
+			},
+			{
+				Query:                 "SELECT CAST('18446744073709551616' AS SIGNED);",
+				Expected:              []sql.Row{{int64(-1)}},
+				ExpectedWarning:       1292,
+				ExpectedWarningsCount: 1,
+			},
+			{
+				Query: "SELECT id, CAST(c0 AS SIGNED) FROM t0 ORDER BY id;",
+				Expected: []sql.Row{
+					{1, int64(-1)},
+					{2, int64(-9223372036854775808)},
+					{3, int64(9223372036854775807)},
+					{4, nil},
+				},
+				ExpectedWarning:       1105,
+				ExpectedWarningsCount: 2,
+			},
+		},
+	},
+	{
 		// https://github.com/dolthub/dolt/issues/9927
 		// https://github.com/dolthub/dolt/issues/9053
 		Name:    "double negation of integer minimum values",
@@ -7021,6 +7098,10 @@ CREATE TABLE tab3 (
 				Expected: []sql.Row{{1695625377}},
 			},
 			{
+				Query:    "SELECT UNIX_TIMESTAMP((SELECT '2023-01-01 12:34:56.789'));",
+				Expected: []sql.Row{{"1672576496.789000"}},
+			},
+			{
 				Query:    "SET time_zone = '-06:00';",
 				Expected: []sql.Row{{types.NewOkResult(0)}},
 			},
@@ -7037,8 +7118,7 @@ CREATE TABLE tab3 (
 			"SET time_zone = '+07:00';",
 			"create table dt (dt0 datetime(0), dt1 datetime(1), dt2 datetime(2), dt3 datetime(3), dt4 datetime(4), dt5 datetime(5), dt6 datetime(6));",
 			"insert into dt values ('2020-01-02 12:34:56.123456', '2020-01-02 12:34:56.123456', '2020-01-02 12:34:56.123456', '2020-01-02 12:34:56.123456', '2020-01-02 12:34:56.123456', '2020-01-02 12:34:56.123456', '2020-01-02 12:34:56.123456')",
-			// TODO: time length not supported, so by default we have max precision
-			"create table t (d date, tt time);",
+			"create table t (d date, tt time(6));",
 			"insert into t values ('2020-01-02 12:34:56.123456', '12:34:56.123456');",
 		},
 		Assertions: []ScriptTestAssertion{
@@ -14197,6 +14277,38 @@ where
 		},
 	},
 	{
+		// PostgreSQL has no DATETIME type or SHOW WARNINGS.
+		Dialect:     "mysql",
+		Name:        "delimited datetime strings with trailing delimiters and zero-padded time portions",
+		SetUpScript: []string{},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query:    "select cast('2012-12-12 12:' as datetime);",
+				Expected: []sql.Row{{time.Date(2012, time.December, 12, 12, 0, 0, 0, time.UTC)}},
+			},
+			{
+				Query:    "show warnings;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query:    "select cast('2012-12-12 12:12:' as datetime);",
+				Expected: []sql.Row{{time.Date(2012, time.December, 12, 12, 12, 0, 0, time.UTC)}},
+			},
+			{
+				Query:    "show warnings;",
+				Expected: []sql.Row{},
+			},
+			{
+				Query:    "select cast('2012-12-12 12:12:0012' as datetime);",
+				Expected: []sql.Row{{time.Date(2012, time.December, 12, 12, 12, 12, 0, time.UTC)}},
+			},
+			{
+				Query:    "show warnings;",
+				Expected: []sql.Row{},
+			},
+		},
+	},
+	{
 		// https://github.com/dolthub/dolt/issues/10088
 		Name:    "datetime with zero date and non-zero times",
 		Dialect: "mysql",
@@ -14358,6 +14470,43 @@ where
 	},
 
 	// Time Tests
+	{
+		Dialect: "mysql",
+		Name:    "time with precision",
+		SetUpScript: []string{
+			"create table tbl (t0 time(0), t1 time(1), t2 time(2), t3 time(3), t4 time(4), t5 time(5), t6 time(6));",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query: "insert into tbl values(" +
+					"'12:34:56.123456', " +
+					"'12:34:56.123456', " +
+					"'12:34:56.123456', " +
+					"'12:34:56.123456', " +
+					"'12:34:56.123456', " +
+					"'12:34:56.123456', " +
+					"'12:34:56.123456'" +
+					")",
+				Expected: []sql.Row{
+					{types.NewOkResult(1)},
+				},
+			},
+			{
+				Query: "select * from tbl;",
+				Expected: []sql.Row{
+					{
+						types.Timespan(45296_000000),
+						types.Timespan(45296_100000),
+						types.Timespan(45296_120000),
+						types.Timespan(45296_123000),
+						types.Timespan(45296_123500),
+						types.Timespan(45296_123460),
+						types.Timespan(45296_123456),
+					},
+				},
+			},
+		},
+	},
 	{
 		Name:        "time with auto_increment",
 		Dialect:     "mysql",
@@ -15303,6 +15452,35 @@ select * from t1 except (
 					{"b", "delete this", "y"},
 					{"c", "delete this", "z"},
 				},
+			},
+		},
+	},
+	{
+		// https://github.com/dolthub/dolt/issues/11913
+		Name: "NOT IN union subquery keeps NOT when a sibling NOT IN is unnested",
+		SetUpScript: []string{
+			"CREATE TABLE items (id VARCHAR(64) PRIMARY KEY, state VARCHAR(32));",
+			"CREATE TABLE tags (item_id VARCHAR(64), tag VARCHAR(255));",
+			"CREATE TABLE links (item_id VARCHAR(64), other_id VARCHAR(64), kind VARCHAR(32));",
+			"INSERT INTO items VALUES ('a','live'),('b','live'),('root','live'),('leaf','busy');",
+			"INSERT INTO tags VALUES ('a','x');",
+			"INSERT INTO links VALUES ('leaf','root','holds');",
+		},
+		Assertions: []ScriptTestAssertion{
+			{
+				Query: `SELECT id FROM items
+WHERE id NOT IN (SELECT DISTINCT l.item_id FROM links l INNER JOIN items i ON l.other_id = i.id WHERE i.state IN ('live','busy')
+UNION SELECT DISTINCT l.other_id FROM links l INNER JOIN items i ON l.item_id = i.id WHERE i.state IN ('live','busy'))
+AND id NOT IN (SELECT item_id FROM tags WHERE tag = 'x')`,
+				Expected: []sql.Row{{"b"}},
+			},
+			{
+				Query:    "SELECT id FROM items WHERE id NOT IN (SELECT item_id FROM tags WHERE tag = 'x') AND id NOT IN (SELECT item_id FROM links UNION SELECT other_id FROM links) ORDER BY id",
+				Expected: []sql.Row{{"b"}},
+			},
+			{
+				Query:    "SELECT id FROM items WHERE id IN (SELECT item_id FROM links UNION SELECT other_id FROM links) AND id NOT IN (SELECT item_id FROM tags WHERE tag = 'x') ORDER BY id",
+				Expected: []sql.Row{{"leaf"}, {"root"}},
 			},
 		},
 	},

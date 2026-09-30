@@ -755,7 +755,7 @@ var (
 	ErrTableAccessDeniedForUser = errors.NewKind("Access denied for user %s to table '%s'")
 
 	// ErrPrivilegeCheckFailed is returned when a user does not have the correct privileges to perform an operation.
-	ErrPrivilegeCheckFailed = errors.NewKind("command denied to user %s")
+	ErrPrivilegeCheckFailed = newMySQLKind("command denied to user %s", 1142, "42000")
 
 	// ErrGrantUserDoesNotExist is returned when a user does not exist when attempting to grant them privileges.
 	ErrGrantUserDoesNotExist = errors.NewKind("You are not allowed to create a user with GRANT")
@@ -906,6 +906,10 @@ var (
 	// ErrValueOutOfRange is returned when a value is out of range for a type.
 	ErrValueOutOfRange = errors.NewKind("%v out of range for %v")
 
+	// ErrValueOutOfRangeForColumn is returned when a value stored in a
+	// column is out of range for the column type.
+	ErrValueOutOfRangeForColumn = newMySQLKind("Out of range value for column '%s' at row %d", mysql.ERWarnDataOutOfRange, mysql.SSDataOutOfRange)
+
 	// ErrIntegerOutOfRange is returned when integer arithmetic exceeds the result type's range.
 	ErrIntegerOutOfRange = newMySQLKind("%s value is out of range in '%s'", mysql.ERDataOutOfRange, mysql.SSDataOutOfRange)
 
@@ -1041,6 +1045,12 @@ var (
 	// ErrInvalidGroupFuncUse is returned when an aggregate function is
 	// used in an invalid context, such as nested in another aggregate.
 	ErrInvalidGroupFuncUse = newMySQLKind("Invalid use of group function", mysql.ERInvalidGroupFuncUse, mysql.SSUnknownSQLState)
+
+	// ErrTooBigScale is returned when a type receives a scale that is too large.
+	ErrTooBigScale = newMySQLKind("Too big scale %v specified. Maximum is %v.", 1425, mysql.SSClientError)
+
+	// ErrTooBigPrecision is returned when a type receives a precision that is too large.
+	ErrTooBigPrecision = newMySQLKind("Too big precision %v specified. Maximum is %v.", 1426, mysql.SSClientError)
 )
 
 // CastSQLError returns a *mysql.SQLError with the error code and in some cases, also a SQL state, populated for the
