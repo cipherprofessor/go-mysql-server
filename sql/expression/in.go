@@ -90,7 +90,6 @@ func (in *InTuple) ResolveCollationCoercibility(ctx *sql.Context) error {
 	return nil
 }
 
-
 // Eval implements [sql.Expression].
 func (in *InTuple) Eval(ctx *sql.Context, row sql.Row) (interface{}, error) {
 	lVal, err := in.Left().Eval(ctx, row)

@@ -143,4 +143,3 @@ func TestReplaceCollationCoercibility(t *testing.T) {
 	require.Equal(t, sql.Collation_latin1_swedish_ci, col)
 	require.Equal(t, byte(4), coer)
 }
-
