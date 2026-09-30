@@ -49,24 +49,12 @@ type CollationCoercible interface {
 	CollationCoercibility(ctx *Context) (collation CollationID, coercibility byte)
 }
 
-// ComparisonCoercible represents an expression that resolves and
-// reports comparison collation and coercibility.
-type ComparisonCoercible interface {
-	// ResolveComparisonCoercibility resolves and stores comparison
-	// collation and coercibility across operands during analysis.
-	ResolveComparisonCoercibility(ctx *Context) error
-	// ComparisonCoercibility returns the resolved comparison
-	// collation and coercibility for this expression.
-	ComparisonCoercibility() (collation CollationID, coercibility byte)
-}
-
 // CollationCoercibilityResolver is an optional interface
 // implemented by expressions that resolve and store their collation
 // and coercibility during analysis.
 type CollationCoercibilityResolver interface {
-	// ResolveCollationCoercibility resolves and stores dominant
-	// collation and coercibility across operands during statement
-	// analysis.
+	// ResolveCollationCoercibility resolves and stores dominant collation
+	// and coercibility across operands during statement analysis.
 	ResolveCollationCoercibility(ctx *Context) error
 }
 

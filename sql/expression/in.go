@@ -32,7 +32,7 @@ type InTuple struct {
 // We implement Comparer because we have a Left() and a Right(), but we can't be Compare()d
 var _ Comparer = (*InTuple)(nil)
 var _ sql.CollationCoercible = (*InTuple)(nil)
-var _ sql.ComparisonCoercible = (*InTuple)(nil)
+var _ sql.CollationCoercibilityResolver = (*InTuple)(nil)
 
 func (in *InTuple) Compare(ctx *sql.Context, row sql.Row) (int, error) {
 	panic("Compare not implemented for InTuple")
@@ -62,14 +62,8 @@ func NewInTuple(left sql.Expression, right sql.Expression) *InTuple {
 	return &InTuple{BinaryExpressionStub: BinaryExpressionStub{left, right}}
 }
 
-// ComparisonCoercibility returns the comparison collation and
-// coercibility for comparing operands of this InTuple.
-func (in *InTuple) ComparisonCoercibility() (sql.CollationID, byte) {
-	return in.cmpCollation, in.cmpCoercibility
-}
-
-// ResolveComparisonCoercibility implements [sql.ComparisonCoercible].
-func (in *InTuple) ResolveComparisonCoercibility(ctx *sql.Context) error {
+// ResolveCollationCoercibility implements [sql.CollationCoercibilityResolver].
+func (in *InTuple) ResolveCollationCoercibility(ctx *sql.Context) error {
 	if !in.Left().Resolved() || !in.Right().Resolved() {
 		return nil
 	}

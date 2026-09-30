@@ -25,12 +25,7 @@ import (
 func resolveCollationCoercibility(ctx *sql.Context, a *Analyzer, n sql.Node, scope *plan.Scope, sel RuleSelector, qFlags *sql.QueryFlags) (sql.Node, transform.TreeIdentity, error) {
 	var err error
 	transform.InspectExpressions(ctx, n, func(ctx *sql.Context, e sql.Expression) bool {
-		if ccr, ok := e.(sql.ComparisonCoercible); ok {
-			if rErr := ccr.ResolveComparisonCoercibility(ctx); rErr != nil {
-				err = rErr
-				return false
-			}
-		} else if cr, ok := e.(sql.CollationCoercibilityResolver); ok {
+		if cr, ok := e.(sql.CollationCoercibilityResolver); ok {
 			if rErr := cr.ResolveCollationCoercibility(ctx); rErr != nil {
 				err = rErr
 				return false

@@ -292,7 +292,7 @@ func TestHashInTuple(t *testing.T) {
 				),
 			),
 		)
-		require.NoError(t, in.ResolveComparisonCoercibility(ctx))
+		require.NoError(t, in.ResolveCollationCoercibility(ctx))
 		expr, err := expression.NewHashInTuple(ctx, in)
 		require.NoError(t, err)
 		require.True(t, expr.IsNullable(ctx))
@@ -311,7 +311,7 @@ func TestHashInTuple(t *testing.T) {
 				),
 			),
 		)
-		require.NoError(t, in.ResolveComparisonCoercibility(ctx))
+		require.NoError(t, in.ResolveCollationCoercibility(ctx))
 		expr, err := expression.NewHashInTuple(ctx, in)
 		require.NoError(t, err)
 		require.True(t, expr.IsNullable(ctx))
@@ -766,7 +766,7 @@ func TestHashInTuple(t *testing.T) {
 			ctx := sql.NewEmptyContext()
 			require := require.New(t)
 			in := expression.NewInTuple(tt.left, tt.right)
-			rErr := in.ResolveComparisonCoercibility(ctx)
+			rErr := in.ResolveCollationCoercibility(ctx)
 			if tt.staticErr != nil {
 				if rErr != nil {
 					require.True(tt.staticErr.Is(rErr))
